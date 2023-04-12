@@ -1,0 +1,335 @@
+---
+title: "Capstone_draft"
+author: "Qinyun (Claire) Cai"
+date: "2023-03-29"
+output: html_document
+---
+
+```{r}
+rm(list=ls())
+cat("\014")
+
+```
+
+```{r}
+# load packages needed 
+library(sqldf)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+```
+
+1. Data Pre-processing 
+
+```{r}
+#read data frame 
+spot_df <- read.csv("Spot Data.csv")
+```
+
+```{r}
+# change names with out dot
+
+names(spot_df) <- c('Patient_ID','Patient_Zip','Patient_Age','Patient_Sex','Type_of_Kit',"Specimen_Type","Client_ID", "Datetime_Kit_Delivered","Datetime_Kit_Registered","Datetime_Sample_Sent_In","Datetime_Sample_Received","Datetime_of_End_Status","End_Status","Rejection_Reason")
+
+```
+
+
+```{r}
+#check general duplication
+duplicated_rows <- duplicated(spot_df)
+duplicated_rows <- spot_df[duplicated_rows,]
+
+#remove exactly same rows 
+spot_df_unique <- unique(spot_df)
+
+
+#check same patient duplication
+#duplicated_patient <- duplicated(spot_df$Patient.ID)
+#duplicated_patient <- spot_df[duplicated_patient,]
+
+
+```
+
+```{r}
+# only keep rows with end_status are rejected, resulted and partially_resulted (for analyzing purpose)
+spot_df_new <- subset(spot_df_unique, End_Status == "rejected" | End_Status == "resulted" | End_Status == "partially_resulted")
+
+```
+
+
+```{r}
+# convert end status variable into dummy
+new1 <- spot_df_new
+new1$End_Status <- ifelse(new1$End_Status == "resulted", 1, 0)
+
+# calculate resulted rate for who purchased same test kit 
+result_rates <- new1 %>%
+  group_by(Patient_ID,Type_of_Kit) %>%
+  summarize(result_rates = mean(End_Status))
+
+# merge the rate back as a new variable in the df called "result_rates"
+df_with_result_rates <- left_join(new1, result_rates, by = c("Patient_ID", "Type_of_Kit"))
+
+
+
+```
+
+
+
+* visualization for time series
+
+
+```{r}
+# select all time related variables to create a new df
+df_time_variables <- new1 %>%
+  select(Patient_ID,
+         Datetime_Kit_Delivered,
+         Datetime_Kit_Registered,
+         Datetime_Sample_Sent_In,
+         Datetime_Sample_Received,
+         Datetime_of_End_Status,
+         End_Status
+         )
+
+# convert all time-related variavles as date
+df_time_variables$Datetime_Kit_Delivered <- as.Date(df_time_variables$Datetime_Kit_Delivered)
+df_time_variables$Datetime_Kit_Registered <- as.Date(df_time_variables$Datetime_Kit_Registered)
+df_time_variables$Datetime_Sample_Sent_In <- as.Date(df_time_variables$Datetime_Sample_Sent_In)
+df_time_variables$Datetime_Sample_Received <- as.Date(df_time_variables$Datetime_Sample_Received)
+df_time_variables$Datetime_of_End_Status <- as.Date(df_time_variables$Datetime_of_End_Status)
+
+#remove NA
+df_time_variables <- na.omit(df_time_variables)
+
+
+```
+
+```{r}
+kit_delivered <- df_time_variables %>% 
+  group_by(day = as.Date(Datetime_Kit_Delivered)) %>% 
+  summarise(kit_delivered_count = n())
+
+plot(kit_delivered$day, kit_delivered$kit_delivered_count, type = "l", xlab = "Day", ylab = "Kit Delivered Count", main = "Daily Delivered Time Series")
+
+top_day <- kit_delivered$day[which.max(kit_delivered$kit_delivered_count)]
+
+abline(v = top_day, col = "red")
+
+```
+```{r}
+#visual for kit delivered
+kit_delivered <- df_time_variables %>% 
+  group_by(month = lubridate::floor_date(Datetime_Kit_Delivered, "month")) %>% 
+  summarise(kit_delivered_count = n())
+
+plot(kit_delivered$month, kit_delivered$kit_delivered_count, type = "l", xlab = "Month", ylab = "Kit Delivered Count", main = "Monthly Delivered Time Series")
+
+top_month <- kit_delivered$month[which.max(kit_delivered$kit_delivered_count)]
+
+abline(v = top_month, col = "red")
+```
+
+
+```{r}
+
+#visual for kit registered
+kit_registered <- df_time_variables %>% 
+  group_by(month = lubridate::floor_date(Datetime_Kit_Registered, "month")) %>% 
+  summarise(kit_registered_count = n())
+
+plot(kit_registered$month, kit_registered$kit_registered_count, type = "l", xlab = "Month", ylab = "Kit Registered Count", main = "Monthly Registered Time Series")
+
+top_month <- kit_registered$month[which.max(kit_registered$kit_registered_count)]
+
+abline(v = top_month, col = "red")
+
+```
+```{r}
+
+
+#visual for sample sent monthly
+sample_sent_in <- df_time_variables %>% 
+  group_by(month = lubridate::floor_date(Datetime_Sample_Sent_In, "month")) %>% 
+  summarise(sample_sent_in_count = n())
+
+plot(sample_sent_in$month, sample_sent_in$sample_sent_in_count, type = "l", xlab = "Month", ylab = "Sample Sent in", main = "Monthly Sample sent in Time Series")
+
+top_month <- sample_sent_in$month[which.max(sample_sent_in$sample_sent_in_count)]
+
+abline(v = top_month, col = "red")
+
+```
+```{r}
+
+#visual for sample received
+sample_received <- df_time_variables %>% 
+  group_by(month = lubridate::floor_date(Datetime_Sample_Received, "month")) %>% 
+  summarise(sample_received_count = n())
+
+plot(sample_received$month, sample_received$sample_received_count, type = "l", xlab = "Month", ylab = "Sample Received", main = "Monthly Sample Received Time Series")
+
+top_month <- sample_received$month[which.max(sample_received$sample_received_count)]
+
+abline(v = top_month, col = "red")
+
+```
+```{r}
+#visual for end status
+
+end_status_time <- df_time_variables %>% 
+  group_by(month = lubridate::floor_date(Datetime_of_End_Status, "month")) %>% 
+  summarise(end_status_time_count = n())
+
+plot(end_status_time$month, end_status_time$end_status_time_count, type = "l", xlab = "Month", ylab = "End Status Released", main = "Monthly End Status Released Time Series")
+
+top_month <- end_status_time$month[which.max(end_status_time$end_status_time_count)]
+
+abline(v = top_month, col = "red")
+```
+
+
+```{r}
+# we might want to know the registered rate, sample sent back rate, sample received rate 
+library(dplyr)
+
+ratios <- spot_df %>%
+  summarize(
+    registered_rate = n_distinct(Datetime_Kit_Registered) / n_distinct(Datetime_Kit_Delivered),
+    sent_back_rate = n_distinct(Datetime_Sample_Sent_In) / n_distinct(Datetime_Kit_Registered)
+  )
+
+ratios
+
+
+
+```
+
+```{r}
+
+# aggregate sales by month
+new2$Datetime_Kit_Delivered <- as.Date(new2$Datetime_Kit_Delivered)
+
+library(dplyr)
+sales_monthly <- new2 %>% 
+  group_by(month = lubridate::floor_date(Datetime_Kit_Delivered, "month")) %>% 
+  summarise(sales_count = sum(End_Status))
+
+# plot the time series
+plot(sales_monthly$month, sales_monthly$sales_count, type = "l", xlab = "Month", ylab = "Sales Count", main = "Monthly Sales Time Series")
+
+top_month <- new2$Datetime_Kit_Delivered[which.max(sales_monthly$sales_count)]
+
+
+
+abline(v = top_month, col = "red")
+
+```
+
+
+
+```{r}
+duplicated_rows1 <- duplicated(new1)
+
+duplicated_rows1 <- new1[duplicated_rows1,]
+```
+
+
+
+
+
+
+
+
+2. Data Visualization 
+
+
+```{r}
+# Patient Age Frequency Distribution 
+
+# Create a small data frame including min, mode, median and max age.
+annotations <- data.frame(
+  x = c(round(min(spot_df_new$Patient_Age), 2), round(mean(spot_df_new$Patient_Age), 2), round(max(spot_df_new$Patient_Age), 2),names(table(spot_df_new$Patient_Age))[which.max(table(spot_df_new$Patient_Age))]),
+  y = c(round(min(spot_df_new$Patient_Age), 2), round(mean(spot_df_new$Patient_Age), 2), round(max(spot_df_new$Patient_Age), 2),names(table(spot_df_new$Patient_Age))[which.max(table(spot_df_new$Patient_Age))]),
+  label = c("Min", "Mean", "Max", "Mode")
+) 
+
+#view(annotations)
+
+
+g1 <- ggplot(spot_df_new, aes(x=Patient_Age)) +
+  geom_histogram(binwidth = 5, fill="#69b3a2", color="#e9ecef") +
+  geom_vline(aes(xintercept = mean(Patient_Age)), linetype="dashed")+
+  annotate("text", x=18, y=0, size =4, label = "Min:18")+
+  annotate("text", x=33, y=1700, size =4, label = "Mode:33")+
+  annotate("text", x=43.51, y=1450, size =4, label = "Mean:43.51")+
+  annotate("text", x=88.00, y=0, size =4, label = "Max:88.00")+
+  theme_bw()+
+  labs(x="Patient Age", y="Count")
+  
+
+g1
+
+
+```
+
+
+
+
+
+```{r}
+# convert end status as dummy variable, resulted = 1, rejected/partially_resulted = 0 
+
+spot_df_new$End_Status <- ifelse(spot_df_new$End_Status == "resulted", 1, 0)
+
+library(dplyr)
+
+#t(t(names(spot_df_new)))
+
+result_rates <- spot_df_new %>%
+  group_by(Patient_ID, Type_of_Kit) %>%
+  summarize(End_Status = mean(End_Status))
+
+End_Status
+
+```
+
+```{r}
+unique_status <- df %>%
+  distinct(`Patient.ID`, `End.Status`)
+
+
+df_filtered <- df %>%
+  group_by(`Patient.ID`, `Type.of.Kit`, `Client.ID`) %>%
+  filter(n_distinct(`End.Status`) > 1)
+```
+
+```{r}
+# create a new df
+
+
+
+new_df <- select (spot_df_new, Patient_ID, Type_of_Kit, End_Status)
+
+new_df$End_Status <- ifelse(new_df$End_Status == "resulted", 1, 0)
+
+result_rates <- new_df %>%
+  group_by(Patient_ID,Type_of_Kit) %>%
+  summarize(End_Status = sum(End_Status)/n())
+
+
+```
+
+
+```{r}
+install.packages("sqldf")
+library(sqldf)
+
+df <- sqld("
+           select id,
+           ")
+
+
+```
+
+
+
