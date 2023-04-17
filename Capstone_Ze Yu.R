@@ -1,7 +1,7 @@
 library(ggplot2)
 library(tidyverse)
 
-Spot_Data <- read_csv("C:/Users/apple/Downloads/Spot Data.csv")
+Spot_Data <- read_csv("Spot Data.csv")
 
 Spot_Data_new <- unique(Spot_Data)
 
