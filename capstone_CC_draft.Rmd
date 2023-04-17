@@ -68,7 +68,7 @@ result_rates <- new1 %>%
   summarize(result_rates = mean(End_Status))
 
 # merge the rate back as a new variable in the df called "result_rates"
-df_with_result_rates <- left_join(new1, result_rates, by = c("Patient_ID", "Type_of_Kit"))
+df_with_result_rates <- left_join(result_rates, new1, by = c("Patient_ID", "Type_of_Kit"))
 
 
 
@@ -203,6 +203,70 @@ ratios
 
 
 ```
+```{r}
+new2 <- new1
+
+# convert all time-related variavles as date
+new2$Datetime_Kit_Delivered <- as.Date(new2$Datetime_Kit_Delivered)
+new2$Datetime_Kit_Registered <- as.Date(new2$Datetime_Kit_Registered)
+new2$Datetime_Sample_Sent_In <- as.Date(new2$Datetime_Sample_Sent_In)
+new2$Datetime_Sample_Received <- as.Date(new2$Datetime_Sample_Received)
+new2$Datetime_of_End_Status <- as.Date(new2$Datetime_of_End_Status)
+
+#remove NA
+new2 <- na.omit(new2)
+
+```
+
+```{r}
+# calculate time gap
+
+library(dplyr)
+
+new2 <- new2 %>%
+  mutate(
+    sample_sent_back_days = as.numeric(difftime(Datetime_Sample_Sent_In, Datetime_Kit_Delivered, units = "days")),
+    sample_received_days = as.numeric(difftime(Datetime_Sample_Received, Datetime_Sample_Sent_In, units = "days")),
+    lab_process_days = as.numeric(difftime(Datetime_of_End_Status,Datetime_Sample_Received, units = "days"))
+  )
+
+#drop original time-related variables 
+new2 <- new2 %>%
+  select(-Datetime_Kit_Delivered,
+         -Datetime_Kit_Registered,
+         -Datetime_Sample_Sent_In,
+         -Datetime_Sample_Received,
+         -Datetime_of_End_Status)
+
+
+```
+
+```{r}
+# drop variables that can not be put in model 
+
+new3 <- new2 %>%
+  select(-Patient_ID,
+         -Patient_Zip,
+         -Type_of_Kit,
+         -Specimen_Type,
+         -Client_ID)
+
+# convert gender in to dummy, Female = 0, male = 1 
+new3$Patient_Sex <- ifelse(new3$Patient_Sex == "M", 1, 0)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
 
 ```{r}
 

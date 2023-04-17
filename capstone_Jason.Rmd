@@ -1,0 +1,43 @@
+---
+title: "Capstone_draft"
+author: "Jason Chen"
+date: "4/5/2023"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(sqldf)
+library(ggplot2)
+
+spotdata <- read.csv("Spot data.csv")
+spotdata_new <- unique(spotdata)
+
+names(spotdata_new) <- c('Patient_ID','Patient_Zip','Patient_Age','Patient_Sex','Type_of_Kit',"Specimen_Type","Client_ID", "Datetime_Kit_Delivered","Datetime_Kit_Registered","Datetime_Sample_Sent_In","Datetime_Sample_Received","Datetime_of_End_Status","End_Status","Rejection_Reason")
+
+# only keep rows with end_status are rejected, resulted and partially_resulted
+spotdata_new <- subset(spotdata_new, End_Status == "rejected" | End_Status == "resulted" | End_Status == "partially_resulted")
+
+data_counts <- count(spotdata_new, Patient_Sex, End_Status)
+
+# Create stacked bar plot using ggplot2
+p1 <- ggplot(data_counts, aes(x = End_Status, y = n, fill = Patient_Sex)) +
+  geom_bar(stat = "identity", position = "dodge")
+p1
+
+data_counts <- count(spotdata_new, Specimen_Type, End_Status)
+
+# Create stacked bar plot using ggplot2
+p2 <- ggplot(data_counts, aes(x = End_Status, y = n, fill = Specimen_Type)) +
+  geom_bar(stat = "identity", position = "dodge")
+p2
+
+data_counts <- count(spotdata_new, Rejection_Reason, End_Status)
+
+# Create stacked bar plot using ggplot2
+p3 <- ggplot(data_counts, aes(x = End_Status, y = n, fill = Rejection_Reason)) +
+  geom_bar(stat = "identity", position = "dodge")
+p3
+
+```
