@@ -17,19 +17,17 @@ library(maps)
 library(dplyr)
 ```
 
-```{r data preprocessing}
+```{r import data }
 df <- read.csv("Spot Data.csv")
 #delete duplicated rows
 spot_df <- unique(df)
 names(spot_df) <- c('Patient_ID','Patient_Zip','Patient_Age','Patient_Sex','Type_of_Kit',"Specimen_Type","Client_ID",	"Datetime_Kit_Delivered","Datetime_Kit_Registered","Datetime_Sample_Sent_In","Datetime_Sample_Received","Datetime_of_End_Status","End_Status","Rejection_Reason")
+```
 
-#
-a <- sqldf("
-SELECT s1.Patient_ID, s1.Type_of_Kit, s1.End_Status,
-FROM spot_df s1
-INNER JOIN spot_df s2 on s1.Patient_ID = s2.Patient_ID
-WHERE s1.Patient_ID = s2.Patient_ID AND s1.Type_of_Kit = s2.Type_of_Kit
-      ")
+- Data Preprocessing
+```{r data result cleaning}
+# only keep rows with end_status are rejected, resulted and partially_resulted (for analyzing purpose)
+spot_df_new <- subset(spot_df, End_Status == "rejected" | End_Status == "resulted" | End_Status == "partially_resulted")
 
 ```
 
@@ -42,16 +40,57 @@ levels(spot_df_new$Type_of_Kit) <- c("1", "2", "3","4","5", "6", "7","8","9", "1
                                      "42","43","44","45", "46","47","48")
 ```
 
-```{r}
-# only keep rows with end_status are rejected, resulted and partially_resulted (for analyzing purpose)
-spot_df_new <- subset(spot_df, End_Status == "rejected" | End_Status == "resulted" | End_Status == "partially_resulted")
-
-```
-
-
-```{r}
+```{r dummy}
 # convert end status variable into dummy
 spot_df_new$End_Status <- ifelse(spot_df_new$End_Status == "resulted", 1, 0)
+
+# convert specimen type variable into dummy
+dummy_df <- model.matrix(~ Specimen_Type- 1, data = spot_df_new)
+dummy_df <- as.data.frame(dummy_df)
+spot_df_new <- cbind(spot_df_new, dummy_df)
+
+#convert gender
+spot_df_new$Patient_Sex <- ifelse(spot_df_new$Patient_Sex == "M", 1, 0)
+```
+
+```{r drop other variables}
+# drop variables that can not be put in model 
+spot_df_new <- spot_df_new %>%
+  select(-Patient_ID,
+         -Patient_Zip,
+         -Type_of_Kit,
+         -Specimen_Type,
+         -Client_ID,
+         -Rejection_Reason)
+```
+
+```{r process time-related variables}
+# convert all time-related variables as date
+spot_df_new$Datetime_Kit_Delivered <- as.Date(spot_df_new$Datetime_Kit_Delivered)
+spot_df_new$Datetime_Kit_Registered <- as.Date(spot_df_new$Datetime_Kit_Registered)
+spot_df_new$Datetime_Sample_Sent_In <- as.Date(spot_df_new$Datetime_Sample_Sent_In)
+spot_df_new$Datetime_Sample_Received <- as.Date(spot_df_new$Datetime_Sample_Received)
+spot_df_new$Datetime_of_End_Status <- as.Date(spot_df_new$Datetime_of_End_Status)
+
+#remove NA
+spot_df_new <- na.omit(spot_df_new)
+
+
+# calculate time gap
+spot_df_new <- spot_df_new %>%
+  mutate(
+    sample_sent_back_days = as.numeric(difftime(Datetime_Sample_Sent_In, Datetime_Kit_Delivered, units = "days")),
+    sample_received_days = as.numeric(difftime(Datetime_Sample_Received, Datetime_Sample_Sent_In, units = "days")),
+    lab_process_days = as.numeric(difftime(Datetime_of_End_Status,Datetime_Sample_Received, units = "days"))
+  )
+
+#drop original time-related variables 
+spot_df_new <- spot_df_new %>%
+  select(-Datetime_Kit_Delivered,
+         -Datetime_Kit_Registered,
+         -Datetime_Sample_Sent_In,
+         -Datetime_Sample_Received,
+         -Datetime_of_End_Status)
 
 ```
 
@@ -79,13 +118,21 @@ ggplot(us_map_region, aes(x = lng, y = lat.x)) +
   theme(legend.position = "none")
 ```
 
-```{r Type of kit attempt}
+```{r Type of kit visualization attempt}
 type_of_kit <- sqldf("
 SELECT s1.Type_of_Kit, COUNT(s1.Type_of_Kit) AS COUNT
 FROM spot_df s1
 GROUP BY s1.Type_of_Kit
 ORDER BY COUNT(s1.Type_of_Kit) DESC
       ")
+
+Specimen_Type <- sqldf("
+SELECT s1.Specimen_Type, COUNT(s1.Specimen_Type) AS COUNT
+FROM spot_df s1
+GROUP BY s1.Specimen_Type
+ORDER BY COUNT(s1.Specimen_Type) DESC
+      ")
+
 type_of_kit_rejected <- sqldf("
 SELECT s1.Type_of_Kit, COUNT(s1.Type_of_Kit) AS COUNT, s1.End_Status
 FROM spot_df_new s1
@@ -122,3 +169,38 @@ a <- ggplot(Total_Resulted, aes(x = reorder(End_Status,Type_of_Kit), y = percent
 a
 ```
 
+Building Model (Logistic Regression)
+```{r logistic regressioin}
+
+#Set Training Set and Validation Set
+
+set.seed(231)
+train.index <- sample(c(1:dim(spot_df_new)[1]), dim(spot_df_new)[1]*0.6)
+
+train.df <- spot_df_new[train.index, ]
+valid.df <- spot_df_new[-train.index, ]
+
+spot_df_new.logit = glm(End_Status~ ., data=train.df, family="binomial")
+round(summary(spot_df_new.logit)$coefficients, 2)
+summary(spot_df_new.logit)
+        
+# Reasons to remove variables
+
+spot_df_new.select.logit = glm(End_Status~ Patient_Age+
+                                 Patient_Sex+
+                                 sample_sent_back_days+
+                                 sample_received_days+
+                                 lab_process_days, data=train.df, family="binomial")
+summary(spot_df_new.select.logit)
+
+#Compute and visualize predicted probabilities for validation set
+spot_df_new.select.logit.pred <- predict(spot_df_new.select.logit, valid.df, type = "response")
+spot_df_new.select.logit.pred
+valid.df$predicted <- spot_df_new.select.logit.pred
+pre_act.df <- data.frame(actual = valid.df$End_Status, predicted = round(spot_df_new.select.logit.pred,4))
+pre_act.df$row <- c(1:length(pre_act.df$actual))
+p <- ggplot(pre_act.df, aes(row)) 
+p + geom_point(aes(y = actual, colour = "actual")) + 
+  geom_point(aes(y = predicted, colour = "predicted")) + ylab("") + 
+  theme(legend.position="top")
+```
