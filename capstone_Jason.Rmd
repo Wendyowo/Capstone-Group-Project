@@ -41,3 +41,76 @@ p3 <- ggplot(data_counts, aes(x = End_Status, y = n, fill = Rejection_Reason)) +
 p3
 
 ```
+
+```{r}
+spot_df <- read.csv("Spot Data.csv")
+
+# change names with out dot
+names(spot_df) <- c('Patient_ID','Patient_Zip','Patient_Age','Patient_Sex','Type_of_Kit',"Specimen_Type","Client_ID", "Datetime_Kit_Delivered","Datetime_Kit_Registered","Datetime_Sample_Sent_In","Datetime_Sample_Received","Datetime_of_End_Status","End_Status","Rejection_Reason")
+
+#check general duplication
+duplicated_rows <- duplicated(spot_df)
+duplicated_rows <- spot_df[duplicated_rows,]
+#remove exactly same rows 
+spot_df_unique <- unique(spot_df)
+
+# only keep rows with end_status are rejected, resulted and partially_resulted (for analyzing purpose)
+spot_df_new <- subset(spot_df_unique, End_Status == "rejected" | End_Status == "resulted" | End_Status == "partially_resulted")
+
+# convert specimen type variable into dummy
+dummy_df <- model.matrix(~ Specimen_Type- 1, data = spot_df_new)
+dummy_df <- as.data.frame(dummy_df)
+spot_df_new <- cbind(spot_df_new, dummy_df)
+
+# convert end status variable into dummy
+new1 <- spot_df_new
+new1$End_Status <- ifelse(new1$End_Status == "resulted", 1, 0)
+
+# convert all time-related variables as date
+new2 <- new1
+new2$Datetime_Kit_Delivered <- as.Date(new2$Datetime_Kit_Delivered)
+new2$Datetime_Kit_Registered <- as.Date(new2$Datetime_Kit_Registered)
+new2$Datetime_Sample_Sent_In <- as.Date(new2$Datetime_Sample_Sent_In)
+new2$Datetime_Sample_Received <- as.Date(new2$Datetime_Sample_Received)
+new2$Datetime_of_End_Status <- as.Date(new2$Datetime_of_End_Status)
+#remove NA
+new2 <- na.omit(new2)
+# calculate time gap
+new2 <- new2 %>%
+  mutate(
+    sample_sent_back_days = as.numeric(difftime(Datetime_Sample_Sent_In, Datetime_Kit_Delivered, units = "days")),
+    sample_received_days = as.numeric(difftime(Datetime_Sample_Received, Datetime_Sample_Sent_In, units = "days")),
+    lab_process_days = as.numeric(difftime(Datetime_of_End_Status,Datetime_Sample_Received, units = "days"))
+  )
+#drop original time-related variables 
+new2 <- new2 %>%
+  select(-Datetime_Kit_Delivered,
+         -Datetime_Kit_Registered,
+         -Datetime_Sample_Sent_In,
+         -Datetime_Sample_Received,
+         -Datetime_of_End_Status)
+
+# drop variables that can not be put in model 
+new3 <- new2 %>%
+  select(-Patient_ID,
+         -Patient_Zip,
+         -Type_of_Kit,
+         -Specimen_Type,
+         -Client_ID)
+# convert gender in to dummy, Female = 0, male = 1 
+new3$Patient_Sex <- ifelse(new3$Patient_Sex == "M", 1, 0)
+new3$End_Status <- as.character(new3$End_Status)
+str(new3)
+```
+
+```{r}
+new4 <- subset(new3,select = c(-4))
+new4 <- subset(new4,select = c(-4,-6,-7,-8,-9,-10))
+str(new4)
+class1.tree <- rpart(End_Status ~ ., data = new4,
+                    control = rpart.control(maxdepth = 5), method = "anova")
+
+#it seems that anova and class method would get different result
+prp(class1.tree, type = 1, extra = 1, split.font = 1, varlen = -10,main="tree model1")
+
+```
