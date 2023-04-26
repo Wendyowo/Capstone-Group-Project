@@ -17,6 +17,9 @@ library(sqldf)
 library(tidyverse)
 library(ggplot2)
 library(dplyr)
+library(forecast)
+library(caret)
+library(pROC)
 ```
 
 1. Data Pre-processing 
@@ -56,12 +59,14 @@ spot_df_new <- subset(spot_df_unique, End_Status == "rejected" | End_Status == "
 
 ```
 
-
 ```{r}
 # convert end status variable into dummy
 new1 <- spot_df_new
 new1$End_Status <- ifelse(new1$End_Status == "resulted", 1, 0)
+```
 
+
+```{r calculate End_Status rate}
 # calculate resulted rate for who purchased same test kit 
 result_rates <- new1 %>%
   group_by(Patient_ID,Type_of_Kit) %>%
@@ -78,8 +83,7 @@ df_with_result_rates <- left_join(result_rates, new1, by = c("Patient_ID", "Type
 
 * visualization for time series
 
-
-```{r}
+```{r df_time_variables - time series}
 # select all time related variables to create a new df
 df_time_variables <- new1 %>%
   select(Patient_ID,
@@ -104,7 +108,8 @@ df_time_variables <- na.omit(df_time_variables)
 
 ```
 
-```{r}
+
+```{r delivery time series daily}
 kit_delivered <- df_time_variables %>% 
   group_by(day = as.Date(Datetime_Kit_Delivered)) %>% 
   summarise(kit_delivered_count = n())
@@ -116,7 +121,8 @@ top_day <- kit_delivered$day[which.max(kit_delivered$kit_delivered_count)]
 abline(v = top_day, col = "red")
 
 ```
-```{r}
+
+```{r Monthly Delivered Time Series}
 #visual for kit delivered
 kit_delivered <- df_time_variables %>% 
   group_by(month = lubridate::floor_date(Datetime_Kit_Delivered, "month")) %>% 
@@ -130,7 +136,7 @@ abline(v = top_month, col = "red")
 ```
 
 
-```{r}
+```{r Monthly Registered Time Series}
 
 #visual for kit registered
 kit_registered <- df_time_variables %>% 
@@ -144,7 +150,10 @@ top_month <- kit_registered$month[which.max(kit_registered$kit_registered_count)
 abline(v = top_month, col = "red")
 
 ```
-```{r}
+
+
+
+```{r Monthly Sample sent in Time Series}
 
 
 #visual for sample sent monthly
@@ -159,7 +168,8 @@ top_month <- sample_sent_in$month[which.max(sample_sent_in$sample_sent_in_count)
 abline(v = top_month, col = "red")
 
 ```
-```{r}
+
+```{r Monthly Sample Received Time Series}
 
 #visual for sample received
 sample_received <- df_time_variables %>% 
@@ -173,7 +183,8 @@ top_month <- sample_received$month[which.max(sample_received$sample_received_cou
 abline(v = top_month, col = "red")
 
 ```
-```{r}
+
+```{r Monthly End Status Released Time Series}
 #visual for end status
 
 end_status_time <- df_time_variables %>% 
@@ -188,7 +199,7 @@ abline(v = top_month, col = "red")
 ```
 
 
-```{r}
+```{r ratios}
 # we might want to know the registered rate, sample sent back rate, sample received rate 
 library(dplyr)
 
@@ -203,6 +214,7 @@ ratios
 
 
 ```
+
 ```{r}
 new2 <- new1
 
@@ -241,7 +253,8 @@ new2 <- new2 %>%
 
 ```
 
-```{r}
+
+```{r new 3 - processed data 1.0}
 # drop variables that can not be put in model 
 
 new3 <- new2 %>%
@@ -257,45 +270,125 @@ new3$Patient_Sex <- ifelse(new3$Patient_Sex == "M", 1, 0)
 ```
 
 
+```{r}
+#visual type of kits.
+Type_of_Kit_Summary <- new2 %>%
+  group_by(Type_of_Kit) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+
+g_type <- ggplot(Type_of_Kit_Summary, aes(x = Type_of_Kit, y= count)) +
+  geom_bar(stat = "identity", fill = "#1f77b4") + 
+  xlab("Type of Kit") +
+  ylab("Count") +
+  ggtitle("Count of Type of Kit by Category")
+
+g_type
+
+#--------------------------------------------------------
+#visual type of kits and specimen type.
+Specimen_Type_Summary <- new2 %>%
+  group_by(Specimen_Type) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+
+g_specimen <- ggplot(Specimen_Type_Summary, aes(x = Specimen_Type, y= count)) +
+  geom_bar(stat = "identity", fill = "#1f77b4") + 
+  xlab("Specimen Type") +
+  ylab("Count") +
+  ggtitle("Count of Specimen Type by Category")
+
+g_specimen
 
 
+```
 
+new 4
 
+```{r new 4 - processed data 2.0}
+new4 <- new2
 
+# convert gender in to dummy, Female = 0, male = 1 
+new4$Patient_Sex <- ifelse(new4$Patient_Sex == "M", 1, 0)
+new4$Type_of_Kit <- ifelse(new4$Type_of_Kit == "5805a410-5d6a-4df0-8f88-290710994672", 1, 0)
+new4$Specimen_Type <- ifelse(new4$Specimen_Type == "adx100_2", 1, 0)
 
+# remove zip code and IDs
+new4 <- new4 %>%
+  select(-Patient_ID,
+         -Patient_Zip,
+         -Client_ID,
+         -Rejection_Reason)
 
-
-
-
+```
 
 ```{r}
+set.seed(231)
+train.index <- sample(c(1:dim(new4)[1]), dim(new4)[1]*0.6)
 
-# aggregate sales by month
-new2$Datetime_Kit_Delivered <- as.Date(new2$Datetime_Kit_Delivered)
-
-library(dplyr)
-sales_monthly <- new2 %>% 
-  group_by(month = lubridate::floor_date(Datetime_Kit_Delivered, "month")) %>% 
-  summarise(sales_count = sum(End_Status))
-
-# plot the time series
-plot(sales_monthly$month, sales_monthly$sales_count, type = "l", xlab = "Month", ylab = "Sales Count", main = "Monthly Sales Time Series")
-
-top_month <- new2$Datetime_Kit_Delivered[which.max(sales_monthly$sales_count)]
-
-
-
-abline(v = top_month, col = "red")
-
+train.df <- new4[train.index, ]
+valid.df <- new4[-train.index, ]
 ```
 
 
 
 ```{r}
-duplicated_rows1 <- duplicated(new1)
+t(t(names(new4)))
 
-duplicated_rows1 <- new1[duplicated_rows1,]
+logistic <- glm(End_Status~., data = train.df, family = binomial())
+
+summary(logistic)
+
 ```
+
+```{r}
+prob_logistic <- predict(object=logistic, newdata = valid.df)
+
+pred <- ifelse(prob_logistic>=0.9, "yes", "no")
+pred <- factor(pred, levels = c("no", "yes"), order = TRUE)
+f <- table(valid.df$End_Status, pred)
+f
+
+
+```
+```{r}
+prob_logistic_1 <- predict(object=logistic, valid.df, type = "response")
+#prob_logistic_1
+valid.df$predicted <- prob_logistic_1
+confusionMatrix <- confusionMatrix(as.factor(valid.df$End_Status), 
+                                   as.factor(ifelse(valid.df$predicted > 0.7, 1, 0)))
+confusionMatrix
+
+
+```
+```{r}
+
+confusionMatrix1 <- confusionMatrix(as.factor(valid.df$End_Status), 
+                                   as.factor(ifelse(valid.df$predicted > 0.9, 1, 0)),
+                                   mode = 'everything')
+
+confusionMatrix1
+
+```
+
+
+
+```{r logit ROC}
+
+roc_curve <- roc(valid.df$End_Status,prob_logistic_1)
+names(roc_curve)
+x <- 1-roc_curve$specificities
+y <- roc_curve$sensitivities
+
+library(ggplot2)
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1) + 
+  annotate('text', x = 0.4, y = 0.5, label =paste('AUC=',round(roc_curve$auc,2))) + 
+  labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')
+
+```
+
+
 
 
 
